@@ -25,11 +25,11 @@ def calculate_angle(v1, v2):
 
 # define finger landmark points
 finger_points = {
-    'thumb': [0, 1, 2, 3, 4],
-    'index': [0, 5, 6, 7, 8],
-    'middle': [0, 9, 10, 11, 12],
-    'ring': [0, 13, 14, 15, 16],
-    'pinky': [0, 17, 18, 19, 20]
+    'thumb': [1, 2, 3, 4],
+    'index': [5, 6, 7, 8],
+    'middle': [9, 10, 11, 12],
+    'ring': [13, 14, 15, 16],
+    'pinky': [17, 18, 19, 20]
 }
 
 movement_limit = 5 # angle change to limit spam (because of twitching)
@@ -37,9 +37,9 @@ previous_finger_angles = {}
 for finger, indices in finger_points.items():
     previous_finger_angles[finger] = [None] * (len(indices) - 2)
 
-# limit how close hand must be (to avoid twitching)
-limit_height = 200
-limit_width = 200
+wrist_movement_limit = 1 # angle change for wrist rotation
+init_wrist_distance = None
+prev_wrist_distance = None
 
 # track if message has been printed previously to avoid spam
 hand_close_printed = False
@@ -77,30 +77,54 @@ while True:
                     box_width = x_max_init - x_min_init
                     box_height = y_max_init - y_min_init
 
-                    # check if bounding box is large enough (to avoid twitching)
-                    if box_width > limit_width and box_height > limit_height:
-                        # calculate x, y and angles for fingers
-                        for finger, indices in finger_points.items():
-                            for i in range(len(indices) - 2):
-                                v1 = np.array(landmarks_positions[indices[i + 1]]) - np.array(landmarks_positions[indices[i]])
-                                v2 = np.array(landmarks_positions[indices[i + 2]]) - np.array(landmarks_positions[indices[i + 1]])
-                                angle = calculate_angle(v1, v2)
+                    # calculate wrist position based on detected hand landmarks (0,5,17) palm
+                    wrist_landmarks_points = [0, 5, 17]
+                    wrist_landmarks = [(hand_landmarks.landmark[i].x * image_width,
+                                        hand_landmarks.landmark[i].y * image_height)
+                                       for i in wrist_landmarks_points]
 
-                                if previous_finger_angles[finger][i] is None or abs(angle - previous_finger_angles[finger][i]) >= movement_limit:
-                                    for idx, landmark in enumerate(hand_landmarks.landmark):
-                                        x_relative = landmarks_positions[indices[i + 1]][0] - x_min_init
-                                        y_relative = landmarks_positions[indices[i + 1]][1] - y_min_init
-                                        print(f"landmark: {idx}): x={x_relative}, y={y_relative}, angle= {angle:.2f} degrees")
-                                previous_finger_angles[finger][i] = angle
+                    # extract coordinates of the landmarks
+                    (x0, y0), (x5, y5), (x17, y17) = wrist_landmarks
 
-                        # draw bounding box
-                        cv2.rectangle(frame, (x_min_init, y_min_init), (x_max_init, y_max_init), (0, 255, 0), 2)
-                        # draw landmarks and connections
-                        mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-                    else:
-                        if not hand_close_printed:
-                            print("Hand is too far away")
-                            hand_close_printed = True
+                    # calculate distance between landmarks 5 and 17
+                    distance_5_17 = np.sqrt((x17 - x5) ** 2 + (y17 - y5) ** 2)
+
+                    if init_wrist_distance is None:
+                        init_wrist_distance = distance_5_17
+
+                    # calculate percentage of rotation based on initial distance
+                    rotation_percentage = (distance_5_17 / box_width) * 100
+
+                    percentage_change = 0
+                    if prev_wrist_distance is not None:
+                        percentage_change = abs(rotation_percentage - (prev_wrist_distance / box_width) * 100)
+
+                    if percentage_change >= wrist_movement_limit:
+                        if distance_5_17 < prev_wrist_distance:
+                            rotation_direction = "left"
+                        else:
+                            rotation_direction = "right"
+                        print(f"Wrist rotation: {rotation_percentage:.2f}% ({rotation_direction})")
+                    prev_wrist_distance = distance_5_17
+
+                    # calculate x, y and angles for fingers
+                    for finger, indices in finger_points.items():
+                        for i in range(len(indices) - 2):
+                            v1 = np.array(landmarks_positions[indices[i + 1]]) - np.array(landmarks_positions[indices[i]])
+                            v2 = np.array(landmarks_positions[indices[i + 2]]) - np.array(landmarks_positions[indices[i + 1]])
+                            angle = calculate_angle(v1, v2)
+
+                            if previous_finger_angles[finger][i] is None or abs(angle - previous_finger_angles[finger][i]) >= movement_limit:
+                                for idx, landmark in enumerate(hand_landmarks.landmark):
+                                    x_relative = landmarks_positions[indices[i + 1]][0] - x_min_init
+                                    y_relative = landmarks_positions[indices[i + 1]][1] - y_min_init
+                                    print(f"landmark: {idx}): x={x_relative}, y={y_relative}, angle= {angle:.2f} degrees")
+                            previous_finger_angles[finger][i] = angle
+
+                    # draw bounding box
+                    cv2.rectangle(frame, (x_min_init, y_min_init), (x_max_init, y_max_init), (0, 255, 0), 2)
+                    # draw landmarks and connections
+                    mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
         # display output frame with landmarks and bounding box
         cv2.imshow("Right Hand Detection", frame)
