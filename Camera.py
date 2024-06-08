@@ -35,29 +35,30 @@ finger_points = {
 
 # define distance (form 0 tp [4,8,12,16,20]) for determining finger status
 # to filter data to only specific options
-distance_positions = {
-    'thumb': {'closed': (0.50, 0.56), 'half_closed': (0.60, 0.66),
-              'half_open': (0.70, 0.86), 'open': (0.90, 1.20)},
-    'index': {'closed': (0.36, 0.46), 'half_closed': (0.50, 0.60),
-              'half': (0.76, 0.86), 'half_open': (0.90, 0.96),
-              'open': (1.00, 1.20)},
-    'middle': {'closed': (0.46, 0.60), 'half_closed': (0.66, 0.70),
-               'half': (0.76, 0.80), 'half_open': (0.86, 0.96),
-               'open': (0.90, 1.20)},
-    'ring': {'closed': (0.36, 0.46), 'half_closed': (0.50, 0.60),
-              'half': (0.76, 0.80), 'half_open': (0.86, 0.90),
-              'open': (0.96, 1.20)},
-    'pinky': {'closed': (0.46, 0.50), 'half_closed': (0.56, 0.60),
-              'half': (0.66, 0.70), 'half_open': (0.76, 0.80),
-              'open': (0.86, 1.20)},
+percentage_positions = {
+    'thumb': {'closed': (50, 59), 'half_closed': (60, 69),
+              'half': (70, 79), 'half_open': (80, 89),
+              'open': (90, 100)},
+    'index': {'closed': (50, 59), 'half_closed': (60, 69),
+              'half': (70, 79), 'half_open': (80, 89),
+              'open': (90, 100)},
+    'middle': {'closed': (50, 59), 'half_closed': (60, 69),
+              'half': (70, 79), 'half_open': (80, 89),
+              'open': (90, 100)},
+    'ring': {'closed': (50, 59), 'half_closed': (60, 69),
+              'half': (70, 79), 'half_open': (80, 89),
+              'open': (90, 100)},
+    'pinky': {'closed': (50, 59), 'half_closed': (60, 69),
+              'half': (70, 79), 'half_open': (80, 89),
+              'open': (90, 100)},
 }
 
 # store information for comparison
-current_status = {finger: None for finger in finger_points.keys()}
 previous_status = {finger: None for finger in finger_points.keys()}
 previous_distance = {finger: None for finger in finger_points.keys()}
+initial_finger_distances = {finger: None for finger in finger_points.keys()}
 
-# countdown (to arrange the fingers to open position )
+# countdown (to arrange the fingers to open position)
 countdown_start_time = time.time()
 countdown_duration = 10
 
@@ -112,11 +113,28 @@ while True:
                         box_width = x_max_init - x_min_init
                         box_height = y_max_init - y_min_init
 
-                        #---------------------------------------------------------------------------------------------------
-                        # calculate distances for landmarks [4,8,12,16,20] to landmark 0 (wrist_position)
+                        # ---------------------------------------------------------------------------------------------------
                         wrist_position = landmarks_positions[0]
+                        # store initial finger distances if not already stored
+                        if any(distance is None for distance in initial_finger_distances.values()):
+                            for finger, indices in finger_points.items():
+                                if indices[-1] in [4, 8, 12, 16, 20]:
+                                    finger_position = landmarks_positions[indices[-1]]
+                                    # normalize position with respect to bounding box
+                                    # to avoid change of distance based on how close hand is to camera
+                                    finger_position = ((finger_position[0] - x_min_init) / box_width,
+                                                       (finger_position[1] - y_min_init) / box_height)
+                                    wrist_position = ((wrist_position[0] - x_min_init) / box_width,
+                                                      (wrist_position[1] - y_min_init) / box_height)
+                                    distance_1 = np.linalg.norm(np.array(finger_position) - np.array(wrist_position))
+                                    initial_finger_distances[finger] = distance_1
+                                    #print(f"Finger: {finger}, Distance={distance_1:.2f}") #(for testing)
+
+                        # calculate distances for landmarks [4,8,12,16,20] to landmark 0 (wrist_position)
                         for finger, indices in finger_points.items():
                             if indices[-1] in [4, 8, 12, 16, 20]:
+                                # get initial distance for this finger
+                                distance_1 = initial_finger_distances[finger]
                                 finger_position = landmarks_positions[indices[-1]]
                                 # normalize position with respect to bounding box
                                 # to avoid change of distance based on how close hand is to camera
@@ -129,20 +147,25 @@ while True:
                                 distance = np.linalg.norm(
                                     np.array(normalized_finger_position) - np.array(normalized_wrist_position))
 
-                                # get status of finger based on normalized distance
+                                #print(f"Distance={distance:.2f} , Distance_1={distance_1:.2f}") #(for testing)
+
+                                # calculate percentage change of distance from initial distance for each finger
+                                percentage_change_distance = (distance / distance_1) * 100
+
+                                # get status of finger based on percentage change
                                 finger_status = None
-                                for status, (dist_range_start, dist_range_end) in distance_positions[finger].items():
-                                    if dist_range_start <= distance < dist_range_end:
+                                for status, (percent_range_start, percent_range_end) in percentage_positions[
+                                    finger].items():
+                                    if percent_range_start <= percentage_change_distance <= percent_range_end:
                                         finger_status = status
                                         break
 
-                                # Update and print finger status if it has changed
+                                # update and print finger status if it has changed
                                 if finger_status and (finger_status != previous_status[finger] or
                                                       previous_distance[finger] is None or
                                                       abs(distance - previous_distance[finger]) > 0.06):
-                                    # it writes changes only when status is changed or at start
                                     if finger_status != previous_status[finger] or previous_distance[finger] is None:
-                                        print(f"Finger: {finger}, Distance={distance:.2f}, Status: {finger_status}")
+                                        print(f"Finger: {finger}, Distance={distance:.2f}, Percentage={percentage_change_distance:.2f}%, Status: {finger_status}")
                                         previous_status[finger] = finger_status
                                         previous_distance[finger] = distance
                                     elif abs(distance - previous_distance[finger]) > 0.06:
